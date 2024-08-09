@@ -90,6 +90,7 @@ func ParseGeneratorStatus(generatorBlob []byte) string {
 }
 
 // loadAndParseJournal tries to parse the snapshot journal in latest format.
+// 解析上次关闭时保存的序列化快照日志，并返回该快照
 func loadAndParseJournal(db ethdb.KeyValueStore, base *diskLayer) (snapshot, journalGenerator, error) {
 	// Retrieve the disk layer generator. It must exist, no matter the
 	// snapshot is fully generated or not. Otherwise the entire disk
@@ -109,6 +110,7 @@ func loadAndParseJournal(db ethdb.KeyValueStore, base *diskLayer) (snapshot, jou
 	// is not matched with disk layer; or the it's the legacy-format journal,
 	// etc.), we just discard all diffs and try to recover them later.
 	var current snapshot = base
+	// 迭代，会加载所有的快照
 	err := iterateJournal(db, func(parent common.Hash, root common.Hash, destructSet map[common.Hash]struct{}, accountData map[common.Hash][]byte, storageData map[common.Hash]map[common.Hash][]byte) error {
 		current = newDiffLayer(current, root, destructSet, accountData, storageData)
 		return nil
@@ -120,6 +122,7 @@ func loadAndParseJournal(db ethdb.KeyValueStore, base *diskLayer) (snapshot, jou
 }
 
 // loadSnapshot loads a pre-existing state snapshot backed by a key-value store.
+// 加载由键值存储支持的预先存在的状态快照，是上次关闭节点时的快照，也就是本地保存的最近的快照
 func loadSnapshot(diskdb ethdb.KeyValueStore, triedb *triedb.Database, root common.Hash, cache int, recovery bool, noBuild bool) (snapshot, bool, error) {
 	// If snapshotting is disabled (initial sync in progress), don't do anything,
 	// wait for the chain to permit us to do something meaningful

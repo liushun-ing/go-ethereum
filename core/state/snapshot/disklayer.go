@@ -35,8 +35,9 @@ type diskLayer struct {
 	triedb *triedb.Database    // Trie node cache for reconstruction purposes
 	cache  *fastcache.Cache    // Cache to avoid hitting the disk for direct access
 
-	root  common.Hash // Root hash of the base snapshot
-	stale bool        // Signals that the layer became stale (state progressed)
+	root common.Hash // Root hash of the base snapshot
+	// 该层过时的标志
+	stale bool // Signals that the layer became stale (state progressed)
 
 	genMarker  []byte                    // Marker for the state that's indexed during initial layer generation
 	genPending chan struct{}             // Notification channel when generation is done (test synchronicity)

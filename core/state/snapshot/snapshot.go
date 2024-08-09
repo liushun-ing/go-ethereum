@@ -97,6 +97,16 @@ var (
 )
 
 // Snapshot represents the functionality supported by a snapshot storage layer.
+// 快照存储层的 public 接口
+// 一个快照就是给定一个区块处的以太坊状态的完整视图。
+// 抽象掉实现方面的细节，它就是把所有账户和合约存储槽堆放在一起，都由扁平的键值对来表示。
+// 所以可以看到他的实现 diskLayer ，包含了一个 diskdb ethdb.KeyValueStore k-v 存储db
+// Geth 客户端的快照由两部分组成：
+// 一部分持久化的硬盘层，是对旧区块（如顶端区块前 128 个区块）处状态的完整快照（节点会在本地保存最近128个区块的快照，节点启动时会尝试加载）
+// 还有一棵内存内 diff 层组成的树，用于收集最新的写入操作： snapshot.Tree
+// 处理新区块的时候，我们不会直接合并这些写入操作到硬盘层，而仅仅是创建一个新的、包含这些变更的内存内 diff 层。
+// 当内存内部的 diff 层积累到足够高的层数时，最底部的一个就开始合并更新并推到硬盘层。
+// 当需要读取一个状态物时，就从最顶端的 diff 层开始查找，一直往下，直至在 diff 层中或者在硬盘层中找到。
 type Snapshot interface {
 	// Root returns the root hash for which this snapshot was made.
 	Root() common.Hash
@@ -116,6 +126,8 @@ type Snapshot interface {
 
 // snapshot is the internal version of the snapshot data layer that supports some
 // additional methods compared to the public API.
+// 快照存储层的内部api版本，比pubic api提供了更多的方法，他有两个实现 diffLayer 和 diskLayer
+// diffLayer 有 parent 属性， diskLayer 是根，所以没有 parent 属性
 type snapshot interface {
 	Snapshot
 
@@ -130,11 +142,13 @@ type snapshot interface {
 	// the specified data items.
 	//
 	// Note, the maps are retained by the method to avoid copying everything.
+	// 创建一个新的 diffLayer ，并返回该层
 	Update(blockRoot common.Hash, destructs map[common.Hash]struct{}, accounts map[common.Hash][]byte, storage map[common.Hash]map[common.Hash][]byte) *diffLayer
 
 	// Journal commits an entire diff hierarchy to disk into a single journal entry.
 	// This is meant to be used during shutdown to persist the snapshot without
 	// flattening everything down (bad for reorgs).
+	// 将整个 diff 层次结构以单个 journal 的形式提交到磁盘，
 	Journal(buffer *bytes.Buffer) (common.Hash, error)
 
 	// Stale return whether this layer has become stale (was flattened across) or
@@ -165,6 +179,10 @@ type Config struct {
 // The goal of a state snapshot is twofold: to allow direct access to account and
 // storage data to avoid expensive multi-level trie lookups; and to allow sorted,
 // cheap iteration of the account/storage tries for sync aid.
+// 这个是快照树
+// 如果链重组的深度超过了 disk layer 的深度，那么所有的快照都将失效
+// 因为内存内部的 diff 层组成了一棵树，所以 128 个区块以内的链重组只需取出属于父块的 diff 层，然后就此开始构建即可。
+// 需要较旧状态的 dApp 和远程同步者可以访问到最近 128 个最近的状态
 type Tree struct {
 	config Config                   // Snapshots configurations
 	diskdb ethdb.KeyValueStore      // Persistent database to store the snapshot
@@ -192,6 +210,8 @@ type Tree struct {
 //     state trie.
 //   - otherwise, the entire snapshot is considered invalid and will be recreated on
 //     a background thread.
+//
+// 创建一棵快照树，会尝试本地加载已有的快照，如果本地加载的最新快照的不匹配root，说明本地宕机一会了，同步已经落后了，则会重新构建
 func New(config Config, diskdb ethdb.KeyValueStore, triedb *triedb.Database, root common.Hash) (*Tree, error) {
 	// Create a new, empty snapshot tree
 	snap := &Tree{
@@ -201,6 +221,7 @@ func New(config Config, diskdb ethdb.KeyValueStore, triedb *triedb.Database, roo
 		layers: make(map[common.Hash]snapshot),
 	}
 	// Attempt to load a previously persisted snapshot and rebuild one if failed
+	// 加载本地的已有的快照，如果最新快照（上次停止节点时的最新区块）不对应root，则会抛弃，然后重新构建
 	head, disabled, err := loadSnapshot(diskdb, triedb, root, config.CacheSize, config.Recovery, config.NoBuild)
 	if disabled {
 		log.Warn("Snapshot maintenance disabled (syncing)")
@@ -213,12 +234,14 @@ func New(config Config, diskdb ethdb.KeyValueStore, triedb *triedb.Database, roo
 	if err != nil {
 		log.Warn("Failed to load snapshot", "err", err)
 		if !config.NoBuild {
+			// 重新构建当前区块（状态）的快照
 			snap.Rebuild(root)
 			return snap, nil
 		}
 		return nil, err // Bail out the error, don't rebuild automatically.
 	}
 	// Existing snapshot loaded, seed all the layers
+	// 这里会从当前最新快照（最新块的快照），不断往前加载，直到遇到第一个快照
 	for head != nil {
 		snap.layers[head.Root()] = head
 		head = head.Parent()
@@ -306,6 +329,7 @@ func (t *Tree) Disable() {
 
 // Snapshot retrieves a snapshot belonging to the given block root, or nil if no
 // snapshot is maintained for that block.
+// 获取当前 blockRoot 的block快照
 func (t *Tree) Snapshot(blockRoot common.Hash) Snapshot {
 	t.lock.RLock()
 	defer t.lock.RUnlock()
@@ -316,6 +340,7 @@ func (t *Tree) Snapshot(blockRoot common.Hash) Snapshot {
 // Snapshots returns all visited layers from the topmost layer with specific
 // root and traverses downward. The layer amount is limited by the given number.
 // If nodisk is set, then disk layer is excluded.
+// 返回从 root 的第一个快照以及往前的 limits 个快照
 func (t *Tree) Snapshots(root common.Hash, limits int, nodisk bool) []Snapshot {
 	t.lock.RLock()
 	defer t.lock.RUnlock()
@@ -348,6 +373,7 @@ func (t *Tree) Snapshots(root common.Hash, limits int, nodisk bool) []Snapshot {
 
 // Update adds a new snapshot into the tree, if that can be linked to an existing
 // old parent. It is disallowed to insert a disk layer (the origin of all).
+// 在当前 parent 的快照下生成一个新的快照，并添加进 t.layers 中
 func (t *Tree) Update(blockRoot common.Hash, parentRoot common.Hash, destructs map[common.Hash]struct{}, accounts map[common.Hash][]byte, storage map[common.Hash]map[common.Hash][]byte) error {
 	// Reject noop updates to avoid self-loops in the snapshot tree. This is a
 	// special case that can only happen for Clique networks where empty blocks
@@ -680,6 +706,7 @@ func (t *Tree) Release() {
 //
 // The method returns the root hash of the base layer that needs to be persisted
 // to disk as a trie too to allow continuing any pending generation op.
+// 将当前 root 的快照以 Journal 的形式保存到磁盘中
 func (t *Tree) Journal(root common.Hash) (common.Hash, error) {
 	// Retrieve the head snapshot to journal from var snap snapshot
 	snap := t.Snapshot(root)
@@ -717,6 +744,7 @@ func (t *Tree) Journal(root common.Hash) (common.Hash, error) {
 // Rebuild wipes all available snapshot data from the persistent database and
 // discard all caches and diff layers. Afterwards, it starts a new snapshot
 // generator with the given root hash.
+// 从当前 root 重新构建快照
 func (t *Tree) Rebuild(root common.Hash) {
 	t.lock.Lock()
 	defer t.lock.Unlock()
@@ -727,6 +755,7 @@ func (t *Tree) Rebuild(root common.Hash) {
 	rawdb.DeleteSnapshotDisabled(t.diskdb)
 
 	// Iterate over and mark all layers stale
+	// 将当前所有的层都设置 stale 信号
 	for _, layer := range t.layers {
 		switch layer := layer.(type) {
 		case *diskLayer:

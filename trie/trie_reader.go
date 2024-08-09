@@ -25,6 +25,7 @@ import (
 
 // trieReader is a wrapper of the underlying node reader. It's not safe
 // for concurrent usage.
+// 树的读操作器，使用底层数据库从数据库读出节点数据
 type trieReader struct {
 	owner  common.Hash
 	reader database.Reader

@@ -1175,6 +1175,7 @@ func (s *StateDB) GetTrie() Trie {
 
 // commit gathers the state mutations accumulated along with the associated
 // trie changes, resetting all internal flags with the new state as the base.
+// 只是收集状态修改和树更新，并重新设置所有的flags，各种缓存和新的状态
 func (s *StateDB) commit(deleteEmptyObjects bool) (*stateUpdate, error) {
 	// Short circuit in case any database failure occurred earlier.
 	if s.dbErr != nil {
@@ -1326,12 +1327,15 @@ func (s *StateDB) commit(deleteEmptyObjects bool) (*stateUpdate, error) {
 
 // commitAndFlush is a wrapper of commit which also commits the state mutations
 // to the configured data stores.
+// 注意在commit中并没有写入到数据库，是在这里才调用的 rawdb.WriteCode
+// 在commit中只是对缓存和内存中的数据做了处理，然后返回了需要更新的信息，如 更新的账户，删除的账户，和更新的 trieNode
 func (s *StateDB) commitAndFlush(block uint64, deleteEmptyObjects bool) (*stateUpdate, error) {
 	ret, err := s.commit(deleteEmptyObjects)
 	if err != nil {
 		return nil, err
 	}
 	// Commit dirty contract code if any exists
+	// 写入磁盘数据库
 	if db := s.db.DiskDB(); db != nil && len(ret.codes) > 0 {
 		batch := db.NewBatch()
 		for _, code := range ret.codes {
@@ -1341,6 +1345,7 @@ func (s *StateDB) commitAndFlush(block uint64, deleteEmptyObjects bool) (*stateU
 			return nil, err
 		}
 	}
+	// 更新完后，需要创建新的快照
 	if !ret.empty() {
 		// If snapshotting is enabled, update the snapshot tree with this new version
 		if s.snap != nil {

@@ -59,10 +59,13 @@ func NewSecure(stateRoot common.Hash, owner common.Hash, root common.Hash, db da
 // the preimage of each key if preimage recording is enabled.
 //
 // StateTrie is not safe for concurrent use.
+// StateTrie 是 Trie 的一层封装，他有一些缓存和数据库操作
+// 他维护了 Trie 的内存数据结构操作，然后有 db 负责将 Trie 这一内存结果持久化到数据库
+// 他底层全是调用的 Trie 的 API
 type StateTrie struct {
 	trie             Trie
 	db               database.Database
-	preimages        preimageStore
+	preimages        preimageStore // 这个还不懂是啥，反正是缓存的一种吧
 	hashKeyBuf       [common.HashLength]byte
 	secKeyCache      map[string][]byte
 	secKeyCacheOwner *StateTrie // Pointer to self, replace the key cache on mismatch
@@ -73,6 +76,7 @@ type StateTrie struct {
 // If root is the zero hash or the sha3 hash of an empty string, the
 // trie is initially empty. Otherwise, New will panic if db is nil
 // and returns MissingNodeError if the root node cannot be found.
+// 创建一个状态树 会根据当前 ID 指定的节点和数据库创建
 func NewStateTrie(id *ID, db database.Database) (*StateTrie, error) {
 	if db == nil {
 		panic("trie.NewStateTrie called without a database")
@@ -247,6 +251,7 @@ func (t *StateTrie) Witness() map[string]struct{} {
 // All cached preimages will be also flushed if preimages recording is enabled.
 // Once the trie is committed, it's not usable anymore. A new trie must
 // be created with new root and updated trie database for following usage
+// 提交内存中的修改，并返回更新的节点set，并设置新的状态
 func (t *StateTrie) Commit(collectLeaf bool) (common.Hash, *trienode.NodeSet) {
 	// Write all the pre-images to the actual disk database
 	if len(t.getSecKeyCache()) > 0 {

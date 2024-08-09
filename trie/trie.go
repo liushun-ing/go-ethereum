@@ -39,6 +39,7 @@ import (
 // 一颗真正的 Merkle Patricia Trie，他保存了一棵树的根节点，并且暴露了树的操作函数，如基本的增删改查
 // 这棵树一旦提交，就不能在被使用
 // 注意这棵树不一定是状态树，实际上，以太坊中的收据树，状态树，合约存储树都是用这个组织的
+// 他这里操作的都只是内存的数据，并不涉及数据库更新
 type Trie struct {
 	root  node
 	owner common.Hash
@@ -121,6 +122,7 @@ func (t *Trie) MustNodeIterator(start []byte) NodeIterator {
 
 // NodeIterator returns an iterator that returns nodes of the trie. Iteration starts at
 // the key after the given start key.
+// 返回一个节点的迭代器
 func (t *Trie) NodeIterator(start []byte) (NodeIterator, error) {
 	// Short circuit if the trie is already committed and not usable.
 	if t.committed {
@@ -144,6 +146,7 @@ func (t *Trie) MustGet(key []byte) []byte {
 //
 // If the requested node is not present in trie, no error will be returned.
 // If the trie is corrupted, a MissingNodeError is returned.
+// 获取 trie 中的节点值
 func (t *Trie) Get(key []byte) ([]byte, error) {
 	// Short circuit if the trie is already committed and not usable.
 	if t.committed {
@@ -213,6 +216,7 @@ func (t *Trie) MustGetNode(path []byte) ([]byte, int) {
 //
 // If the requested node is not present in trie, no error will be returned.
 // If the trie is corrupted, a MissingNodeError is returned.
+// 使用 compact-encoded path 路径获取树中的节点数据，它是有两种编码，真正存储到数据库是 compact-encoded 编码
 func (t *Trie) GetNode(path []byte) ([]byte, int, error) {
 	// Short circuit if the trie is already committed and not usable.
 	if t.committed {
@@ -594,6 +598,7 @@ func (t *Trie) resolve(n node, prefix []byte) (node, error) {
 // and path prefix and also tracks the loaded node blob in tracer treated as the
 // node's original value. The rlp-encoded blob is preferred to be loaded from
 // database because it's easy to decode node while complex to encode node to blob.
+// 根据数据解析node节点，通过 reader 从数据库中读取 n 节点的字节数据，然后使用 RLP 进行解码
 func (t *Trie) resolveAndTrack(n hashNode, prefix []byte) (node, error) {
 	blob, err := t.reader.node(prefix, common.BytesToHash(n))
 	if err != nil {
@@ -652,6 +657,7 @@ func (t *Trie) Commit(collectLeaf bool) (common.Hash, *trienode.NodeSet) {
 	for _, path := range t.tracer.deletedNodes() {
 		nodes.AddNode([]byte(path), trienode.NewDeleted())
 	}
+	// 使用 newCommitter 提交 t.root 他会递归整棵树，这里都只是操作内存
 	t.root = newCommitter(nodes, t.tracer, collectLeaf).Commit(t.root)
 	return rootHash, nodes
 }

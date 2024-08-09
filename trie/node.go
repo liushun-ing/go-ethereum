@@ -125,6 +125,7 @@ func (n rawNode) EncodeRLP(w io.Writer) error {
 }
 
 // mustDecodeNode is a wrapper of decodeNode and panic if any error is encountered.
+// 将字节数据编码为 node 对象
 func mustDecodeNode(hash, buf []byte) node {
 	n, err := decodeNode(hash, buf)
 	if err != nil {

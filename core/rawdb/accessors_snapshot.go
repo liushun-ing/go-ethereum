@@ -143,6 +143,7 @@ func DeleteSnapshotJournal(db ethdb.KeyValueWriter) {
 
 // ReadSnapshotGenerator retrieves the serialized snapshot generator saved at
 // the last shutdown.
+// 检索上次关闭时保存的序列化快照生成器
 func ReadSnapshotGenerator(db ethdb.KeyValueReader) []byte {
 	data, _ := db.Get(snapshotGeneratorKey)
 	return data
